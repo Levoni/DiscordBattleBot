@@ -126,6 +126,8 @@ function HandleGMCommands(msg, ...command) {
         Hazard(msg, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
     } else if (command[0] == 'close') {
         Close(msg, command.length < 2 ? '' : command[1], command.length < 3 ? '' : command[2]);
+    } else if (command[0] == 'list') {
+        List(msg, command.length < 2 ? null : command[1], command.length < 3 ? null : command[2]);
     }
 }
 
@@ -257,21 +259,8 @@ function DropSupplies(msg, target, itemName) {
     let id = GetUserId(msg);
     if (id == GmId) {
         if (target == '') {
-            let reply = 'Possible Locations for drop: ';
-            for (let i = 0; i < locations.length; i++) {
-                reply += locations[i].name;
-                if (i + 1 != locations.length) {
-                    reply += ', ';
-                }
-            }
-            reply += ' | Possible Items for drop: ';
-            for (let i = 0; i < itemLookup.length; i++) {
-                reply += itemLookup[i].name;
-                if (i + 1 != itemLookup.length) {
-                    reply += ', ';
-                }
-            }
-            msg.reply(reply);
+            let reply = 'Possible ' + GetOpenLocationsString();
+            reply += 'Possible ' + GetItemLookupListString();
             return;
         }
         let loc = locations.find((x) => { return x.name == target });
@@ -285,10 +274,7 @@ function DropSupplies(msg, target, itemName) {
 }
 function KillPlayer(msg, target) {
     if (target == '') {
-        let reply = 'Possible players to kill: ';
-        for (let i = 0; i < players.length; i++) {
-            reply += players[i].name;
-        }
+        let reply = 'Possible' + GetPlayersString();
         msg.reply(reply);
         return;
     }
@@ -299,20 +285,8 @@ function KillPlayer(msg, target) {
 }
 function Hazard(msg, targetLocation, targetHazard) {
     if (targetLocation == '' || targetHazard == '') {
-        let reply = 'Possible locations for hazard: ';
-        for (let i = 0; i < locations.length; i++) {
-            reply += locations[i].name;
-            if (i + 1 != itemLookup.length) {
-                reply += ', ';
-            }
-        }
-        reply += ' | Possible hazards: '
-        for (let i = 0; i < hazardLookup.length; i++) {
-            reply += hazardLookup[i].name;
-            if (i + 1 != hazardLookup.length) {
-                reply += ', ';
-            }
-        }
+        let reply = 'Possible ' + GetOpenLocationsString();
+        reply += ' | Possible ' + GetHazardListString();
         msg.reply(reply);
         return;
     }
@@ -327,13 +301,7 @@ function Hazard(msg, targetLocation, targetHazard) {
 }
 function Close(msg, targetLocation, moveType) {
     if (targetLocation == '') {
-        let reply = 'Possible locations to close: ';
-        for (let i = 0; i < locations.length; i++) {
-            reply += locations[i].name;
-            if (i + 1 != itemLookup.length) {
-                reply += ', ';
-            }
-        }
+        let reply = GetOpenLocationsString();
         msg.reply(reply);
         return;
     }
@@ -351,6 +319,35 @@ function Close(msg, targetLocation, moveType) {
         }
     }
 }
+function List(msg, command, argument) {
+    if(command == null) {
+        let reply = 'Possible options: players, playerInfo (player name), locations, locationInfo (location name)';
+        msg.reply(reply);
+    } else if (command == 'players') {
+        let reply = GetPlayersString();
+        msg.reply(reply);
+    } else if (command == 'playerInfo' && argument != null) {
+        let player = players.find((x) => x.name = argument);
+        if (player != null) {
+            let reply = 'Status - ';
+            reply += GetPlayerStatsString(player);
+            reply += ' | ' + GetPlayerItemsString(player);
+            msg.reply(reply);
+        }
+    } else if (command == 'locations') {
+        let reply = GetOpenLocationsString();
+        msg.reply(reply);
+    } else if (command == 'locationInfo'  && argument != null) {
+        let location = locations.find((x) => { return x.name = argument })
+        if (location != null) {
+            let reply = 'Location Name: ' + location.name;
+            reply += ' | ' + GetConnectedLocationsString(location);
+            reply += ' | ' + GetLocationItemsString(location);
+            reply += ' | ' + GetLocationPlayersString(location);
+            msg.reply(reply);
+        }
+    }
+}
 //#endregion
 
 //#region Player Actions
@@ -360,38 +357,10 @@ function PlayerLook(msg) {
     if (player != null) {
         let currentLoc = locations.find(x => player.loc == x.name);
         if (currentLoc != null) {
-            let reply = 'Current Location: ' + currentLoc.name
-            reply += ' | Items: ';
-            if (currentLoc.items.length == 0) {
-                reply += 'None'
-            }
-            for (let i = 0; i < currentLoc.items.length; i++) {
-                reply += currentLoc.items[i];
-                if (i + 1 != currentLoc.items.length) {
-                    reply += ', ';
-                }
-            };
-            reply += ' | Connected Locations: ';
-            if (currentLoc.connectedLoc.length == 0) {
-                reply += 'None'
-            }
-            for (let i = 0; i < currentLoc.connectedLoc.length; i++) {
-                reply += currentLoc.connectedLoc[i];
-                if (i + 1 != currentLoc.connectedLoc.length) {
-                    reply += ', ';
-                }
-            };
-            let otherPlayers = players.filter((x) => { x.loc == currentLoc.name && x.playerId != player.playerId })
-            reply += ' | Other Players: ';
-            if (otherPlayers.length == 0) {
-                reply += 'None'
-            }
-            for (let i = 0; i < otherPlayers.length; i++) {
-                reply += otherPlayers[i];
-                if (i + 1 != otherPlayers.length) {
-                    reply += ', ';
-                }
-            };
+            let reply = `Current Location:  ${currentLoc.name} | `
+            reply += GetLocationItemsString(currentLoc) + ' | ';
+            reply += GetConnectedLocationsString(currentLoc) + ' | ';
+            reply += GetOtherPlayerListString(player);
             msg.reply(reply);
         }
     }
@@ -403,16 +372,7 @@ function PickUp(msg, target) {
         let loc = locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
-                let reply = 'Items possible to pick up: ';
-                if (loc.items.length == 0) {
-                    reply += 'None'
-                }
-                for (let i = 0; i < loc.items.length; i++) {
-                    reply += loc.items[i];
-                    if (i + 1 != loc.items.length) {
-                        reply += ', ';
-                    }
-                };
+                let reply = GetLocationItemsString(loc);
                 msg.reply(reply);
                 return;
             }
@@ -442,18 +402,7 @@ function Move(msg, target) {
         let loc = locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
-                let reply = 'Possible areas to move to: ';
-                if (loc.connectedLoc.length == 0) {
-                    reply += 'None'
-                }
-                for (let i = 0; i < loc.connectedLoc.length; i++) {
-                    locInfo = locations.find((x) => { return x.name == loc.connectedLoc[i] })
-                    if (locInfo != null && !locInfo.closed) {
-                        reply += loc.connectedLoc[i];
-                    }
-                };
-                if (reply.charAt(reply.length - 1) == ',')
-                    reply = reply.slice(-1)
+                let reply = GetConnectedLocationsString(loc);
                 msg.reply(reply);
                 return;
             }
@@ -474,16 +423,7 @@ function Drop(msg, target) {
         let loc = locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
-                let reply = 'Items possible to drop: ';
-                if (player.inv.length == 0) {
-                    reply += 'None'
-                }
-                for (let i = 0; i < player.inv.length; i++) {
-                    reply += player.inv[i];
-                    if (i + 1 != player.inv.length) {
-                        reply += ', ';
-                    }
-                };
+                let reply = 'Droppable  ' + GetPlayerItemsString(player);
                 msg.reply(reply);
                 return;
             }
@@ -511,16 +451,7 @@ function Use(msg, target) {
         let loc = locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
-                let reply = 'Items possible to use: ';
-                if (player.inv.length == 0) {
-                    reply += 'None'
-                }
-                for (let i = 0; i < player.inv.length; i++) {
-                    reply += player.inv[i];
-                    if (i + 1 != player.inv.length) {
-                        reply += ', ';
-                    }
-                };
+                let reply = 'Usable ' + GetPlayerUsableItemsString(player);
                 msg.reply(reply);
                 return;
             }
@@ -548,23 +479,9 @@ function status(msg) {
     let id = msg.author.id;
     let player = players.find((x) => { return x.playerId == id })
     if (player != null) {
-        let reply = 'Status';
-        reply += ' - Health: ' + player.health;
-        reply += ' | Energy: ' + player.energy;
-        reply += ' | Location: ' + player.loc;
-        reply += ' | trait: ' + player.trait;
-        reply += ' | Weight: ' + player.invWeight;
-        reply += ' | Equipped Item: ' + player.equippedItem;
-        reply += ' | Items: ';
-        if (player.inv.length == 0) {
-            reply += 'None';
-        }
-        for (let i = 0; i < player.inv.length; i++) {
-            reply += player.inv[i];
-            if (i + 1 != player.inv.length) {
-                reply += ', ';
-            }
-        };
+        let reply = 'Status - ';
+        reply += GetPlayerStatsString(player);
+        reply += ' | ' + GetPlayerItemsString(player);
         msg.reply(reply);
     }
 }
@@ -609,18 +526,21 @@ function EndGame() {
 function GetUserId(msg) {
     return msg.mem == null ? msg.author == null ? '' : msg.author.id : msg.mem.user.id;
 }
+//#endregion
 
-function GetLocationsString() {
+//#region String Methods
+function GetOpenLocationsString() {
     var reply = 'Locations: ';
-    for (let i = 0; i < locations.length; i++) {
-        reply += locations[i].name + ',';
+    let filteredLocations = locations.filter((x) => { return !x.closed })
+    for (let i = 0; i < filteredLocations.length; i++) {
+        reply += filteredLocations[i].name + ',';
     }
     if (reply.charAt(reply.length - 1) == ',') {
-        reply = reply.slice(-1);
+        reply = reply.slice(0, reply.length - 1);
     }
     return reply;
 }
-function GetConnectedLocationsString(location) {
+function GetConnectedLocationsString(loc) {
     let reply = 'Connected Locations: ';
     if (loc.connectedLoc.length == 0) {
         reply += 'None'
@@ -632,11 +552,11 @@ function GetConnectedLocationsString(location) {
         }
     };
     if (reply.charAt(reply.length - 1) == ',')
-        reply = reply.slice(-1)
+        reply = reply.slice(0, reply.length - 1)
     return reply
 }
 function GetLocationItemsString(location) {
-    reply += 'Items: ';
+    let reply = 'Items: ';
     if (location.items.length == 0) {
         reply += 'None'
     }
@@ -644,16 +564,30 @@ function GetLocationItemsString(location) {
         reply += location.items[i] + ',';
     };
     if (reply.charAt(reply.length - 1) == ',')
-        reply = reply.slice(-1)
+        reply = reply.slice0, reply.length(-1)
     return reply
+}
+function GetLocationPlayersString(location) {
+    let reply = 'Players: ';
+    PlayerList = players.filter((x) => { return x.loc = location })
+    if (PlayerList.length == 0) {
+        reply += 'None';
+    }
+    for (let i = 0; i < PlayerList.length; i++) {
+        reply += PlayerList[i].name + ',';
+    }
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
+    }
+    return reply;
 }
 function GetPlayersString() {
     let reply = 'Players:  ';
     for (let i = 0; i < players.length; i++) {
         reply += players[i].name + ',';
     }
-    if (reply.charAt(reply.length - 1)) {
-        reply = reply.slice(-1);
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
     }
     return reply;
 }
@@ -665,8 +599,8 @@ function GetPlayerItemsString(player) {
     for (let i = 0; i < player.inv.length; i++) {
         reply += player.inv[i] + ',';
     };
-    if (reply.charAt(reply.length - 1)) {
-        reply = reply.slice(-1);
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
     }
     return reply;
 }
@@ -681,8 +615,8 @@ function GetPlayerUsableItemsString(player) {
             reply += player.inv[i] + ',';
         }
     };
-    if (reply.charAt(reply.length - 1)) {
-        reply = reply.slice(-1);
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
     }
     return reply;
 }
@@ -695,17 +629,17 @@ function GetPlayerStatsString(player) {
     reply += ' | Equipped Item: ' + player.equippedItem;
     return reply;
 }
-function GetItemLookupList() {
+function GetItemLookupListString() {
     reply += 'Items: ';
     for (let i = 0; i < itemLookup.length; i++) {
         reply += itemLookup[i].name + ',';
     }
-    if (reply.charAt(reply.length - 1)) {
-        reply = reply.slice(-1);
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
     }
     return reply;
 }
-function GetOtherPlayerList(player) {
+function GetOtherPlayerListString(player) {
     reply += 'Players: ';
     PlayerList = players.filter((x) => { return x.loc = player.loc && player.name != x.name })
     if (PlayerList.length == 0) {
@@ -714,8 +648,18 @@ function GetOtherPlayerList(player) {
     for (let i = 0; i < PlayerList.length; i++) {
         reply += PlayerList[i].name + ',';
     }
-    if (reply.charAt(reply.length - 1)) {
-        reply = reply.slice(-1);
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
+    }
+    return reply;
+}
+function GetHazardListString() {
+    reply += 'Hazards: ';
+    for (let i = 0; i < hazardLookup.length; i++) {
+        reply += hazardLookup[i].name + ',';
+    }
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
     }
     return reply;
 }
