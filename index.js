@@ -452,7 +452,7 @@ function Move(msg, target) {
                         reply += loc.connectedLoc[i];
                     }
                 };
-                if(reply.charAt(reply.length - 1) == ',')
+                if (reply.charAt(reply.length - 1) == ',')
                     reply = reply.slice(-1)
                 msg.reply(reply);
                 return;
@@ -526,7 +526,7 @@ function Use(msg, target) {
             }
             let itemName = player.inv.find((x) => { return x == target });
             if (itemName != null) {
-                let itemInfo = itemLookup.find((x) => { return x.name == itemName});
+                let itemInfo = itemLookup.find((x) => { return x.name == itemName });
                 if (itemInfo != null && itemInfo.type == 'consumable') {
                     if (itemInfo.subType == 'health') {
                         player.health = Math.min(itemInfo.value + player.health, 100);
@@ -554,6 +554,7 @@ function status(msg) {
         reply += ' | Location: ' + player.loc;
         reply += ' | trait: ' + player.trait;
         reply += ' | Weight: ' + player.invWeight;
+        reply += ' | Equipped Item: ' + player.equippedItem;
         reply += ' | Items: ';
         if (player.inv.length == 0) {
             reply += 'None';
@@ -564,7 +565,6 @@ function status(msg) {
                 reply += ', ';
             }
         };
-        reply += ' | Equipped Item: ' + player.equippedItem;
         msg.reply(reply);
     }
 }
@@ -611,22 +611,113 @@ function GetUserId(msg) {
 }
 
 function GetLocationsString() {
-
+    var reply = 'Locations: ';
+    for (let i = 0; i < locations.length; i++) {
+        reply += locations[i].name + ',';
+    }
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(-1);
+    }
+    return reply;
 }
-function GetConnectedLocationsString() {
-
+function GetConnectedLocationsString(location) {
+    let reply = 'Connected Locations: ';
+    if (loc.connectedLoc.length == 0) {
+        reply += 'None'
+    }
+    for (let i = 0; i < loc.connectedLoc.length; i++) {
+        locInfo = locations.find((x) => { return x.name == loc.connectedLoc[i] })
+        if (locInfo != null && !locInfo.closed) {
+            reply += loc.connectedLoc[i] + ',';
+        }
+    };
+    if (reply.charAt(reply.length - 1) == ',')
+        reply = reply.slice(-1)
+    return reply
 }
-function GetLocationItemsString() {
-
+function GetLocationItemsString(location) {
+    reply += 'Items: ';
+    if (location.items.length == 0) {
+        reply += 'None'
+    }
+    for (let i = 0; i < location.items.length; i++) {
+        reply += location.items[i] + ',';
+    };
+    if (reply.charAt(reply.length - 1) == ',')
+        reply = reply.slice(-1)
+    return reply
 }
 function GetPlayersString() {
-
+    let reply = 'Players:  ';
+    for (let i = 0; i < players.length; i++) {
+        reply += players[i].name + ',';
+    }
+    if (reply.charAt(reply.length - 1)) {
+        reply = reply.slice(-1);
+    }
+    return reply;
 }
 function GetPlayerItemsString(player) {
-
+    reply = 'Items: '
+    if (player.inv.length == 0) {
+        reply += 'None';
+    }
+    for (let i = 0; i < player.inv.length; i++) {
+        reply += player.inv[i] + ',';
+    };
+    if (reply.charAt(reply.length - 1)) {
+        reply = reply.slice(-1);
+    }
+    return reply;
+}
+function GetPlayerUsableItemsString(player) {
+    reply = 'Items: '
+    if (player.inv.length == 0) {
+        reply += 'None';
+    }
+    for (let i = 0; i < player.inv.length; i++) {
+        let itemInfo = itemLookup.find((x) => { return x.name == itemName });
+        if (itemInfo.type == 'consumable' && itemInfo.subType != 'ammo') {
+            reply += player.inv[i] + ',';
+        }
+    };
+    if (reply.charAt(reply.length - 1)) {
+        reply = reply.slice(-1);
+    }
+    return reply;
 }
 function GetPlayerStatsString(player) {
-
+    reply = 'Health: ' + player.health;
+    reply += ' | Energy: ' + player.energy;
+    reply += ' | Location: ' + player.loc;
+    reply += ' | trait: ' + player.trait;
+    reply += ' | Weight: ' + player.invWeight;
+    reply += ' | Equipped Item: ' + player.equippedItem;
+    return reply;
+}
+function GetItemLookupList() {
+    reply += 'Items: ';
+    for (let i = 0; i < itemLookup.length; i++) {
+        reply += itemLookup[i].name + ',';
+    }
+    if (reply.charAt(reply.length - 1)) {
+        reply = reply.slice(-1);
+    }
+    return reply;
+}
+function GetOtherPlayerList(player) {
+    reply += 'Players: ';
+    PlayerList = players.filter((x) => { return x.loc = player.loc && player.name != x.name })
+    if (PlayerList.length == 0) {
+        reply += 'None';
+    }
+    for (let i = 0; i < PlayerList.length; i++) {
+        reply += PlayerList[i].name + ',';
+    }
+    if (reply.charAt(reply.length - 1)) {
+        reply = reply.slice(-1);
+    }
+    return reply;
 }
 //#endregion
 
