@@ -77,9 +77,15 @@ client.on('message', async msg => {
     }
     // Check if the message starts with '!hello' and respond with 'world!' if it does.
     if (msg.content.startsWith("!hello")) {
+        sendHelloAfterDeley(msg);
         msg.reply('Hello, I hope you are having a wonderful day!')
     }
 });
+
+async function sendHelloAfterDeley(msg) {
+    await delayForSeconds(5);
+    msg.reply('delayed Hello')
+}
 
 //#region Command Handlers
 function HandleGMCommands(msg, ...command) {
@@ -175,10 +181,12 @@ function HandlePlayerCommands(msg, ...command) {
         Move(msg, command.length > 1 ? command[1] : '');
     } else if (command[0] == 'drop') {
         Drop(msg, command.length > 1 ? command[1] : '');
-    } else if (command[0] == 'use') {
+    } else if (command[0] == 'use') { 
         Use(msg, command.length > 1 ? command[1] : '');
     } else if (command[0] == 'status') {
         status(msg);
+    } else if (command[0] == 'equip') {
+        equip(msg, command.length > 1 ? command[1] : null);
     }
 }
 //#endregion
@@ -485,6 +493,28 @@ function status(msg) {
         msg.reply(reply);
     }
 }
+function equip(msg, target) {
+    let id = GetUserId(msg);
+    let player = players.find((x) => {return x.playerId == id});
+    if(player != null) {
+        if(target == null) {
+            let reply = 'Equipable '+ GetPlayerEquipableItemsString(player);
+            msg.reply(reply);
+        }
+        let itemName = player.inv.find((x)=>{return x == target});
+        if(itemName != null) {
+            let itemInfo = itemLookup.find((x)=>{return x.name == itemName});
+            if(itemInfo != null) {
+                if(itemInfo.type == 'weapon') {
+                    player.equippedItem = itemInfo.name;
+                }
+            }
+        }
+    }
+}
+function attack(msg, target) {
+
+}
 //#endregion
 
 //#region Helper methods
@@ -526,6 +556,10 @@ function EndGame() {
 function GetUserId(msg) {
     return msg.mem == null ? msg.author == null ? '' : msg.author.id : msg.mem.user.id;
 }
+
+function delayForSeconds(sec) {
+    return new Promise(resolve => setTimeout(resolve, sec * 1000));
+  }
 //#endregion
 
 //#region String Methods
@@ -615,6 +649,24 @@ function GetPlayerUsableItemsString(player) {
             reply += player.inv[i] + ',';
         }
     };
+    if (reply.charAt(reply.length - 1) == ',') {
+        reply = reply.slice(0, reply.length - 1);
+    }
+    return reply;
+}
+function GetPlayerEquipableItemsString(player) {
+    reply = 'Items: '
+    var itemCount = 0
+    for (let i = 0; i < player.inv.length; i++) {
+        let itemInfo = itemLookup.find((x) => { return x.name == player.inv[i] });
+        if (itemInfo.type == 'weapon') {
+            reply += player.inv[i] + ',';
+            itemCount ++;
+        }
+    };
+    if(itemCount == 0) {
+        reply += 'None';
+    }
     if (reply.charAt(reply.length - 1) == ',') {
         reply = reply.slice(0, reply.length - 1);
     }
