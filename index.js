@@ -54,6 +54,38 @@ let hazardLookup = [{
     name: 'storm',
     value: '10'
 }]
+let energyCostLookup = [{
+    name: 'move',
+    cost: 20
+},
+{
+    name: 'look',
+    cost: 5
+},
+{
+    name: 'pickup',
+    cost: 10
+},
+{
+    name: 'drop',
+    cost: 10
+},
+{
+    name: 'use',
+    cost: 10
+},
+{
+    name: 'status',
+    cost: 2
+},
+{
+    name: 'equip',
+    cost: 5
+},
+{
+    name: 'attack',
+    cost: 30
+}]
 
 // Register an event so that when the bot is ready, it will log a messsage to the terminal
 client.on('ready', () => {
@@ -72,12 +104,12 @@ client.on('message', async msg => {
         HandleHelpCommands(msg, ...args.slice(1));
         return;
     }
-    
+
     //Only allow appropriate channels
-    if(!(msg.channel.type == 'DM' || msg.channel.name == 'bb-game-setup' || msg.channel.name == 'bb-game-info')) {
+    if (!(msg.channel.type == 'DM' || msg.channel.name == 'bb-game-setup' || msg.channel.name == 'bb-game-info')) {
         return;
     }
-    
+
     //command handlers
     if (args[0] == '!gm') {
         HandleGMCommands(msg, ...args.slice(1));
@@ -150,6 +182,8 @@ function HandlePlayerCommands(msg, ...command) {
     //Command Validation
     if (command.length == 0)
         return;
+
+    //Enroling feedback
     if (command[0] != 'enroll') {
         let id = GetUserId(msg);
         let player = players.find((x) => { return x.playerId == id })
@@ -163,6 +197,8 @@ function HandlePlayerCommands(msg, ...command) {
             return;
         }
     }
+
+    //Check message origin
     if (msg.channel.type == 'DM' &&
         (command[0] == 'enroll' || command[0] == 'leave')) {
         msg.reply('Please enroll using the main channel and not DMs')
@@ -182,6 +218,8 @@ function HandlePlayerCommands(msg, ...command) {
         } else {
             msg.member.send('Game can not be joined at the moment')
         }
+    } else if (command[0] == 'selectTrait') {
+        selectTrait(msg);
     } else if (command[0] == 'look') {
         PlayerLook(msg);
     } else if (command[0] == 'pickup') {
@@ -202,15 +240,15 @@ function HandlePlayerCommands(msg, ...command) {
 }
 
 function HandleHelpCommands(msg, ...command) {
-    if(command.length == 0) {
+    if (command.length == 0) {
         msg.reply(GetGeneralHelpString());
-    } else if(command[0] == 'configuration') {
+    } else if (command[0] == 'configuration') {
         msg.reply(GetConfigurationHelpString())
-    } else if(command[0] == 'gameSetup') {
+    } else if (command[0] == 'gameSetup') {
         msg.reply(GetGameSetupHelpString())
-    } else if(command[0] == 'gameMaster') {
+    } else if (command[0] == 'gameMaster') {
         msg.reply(GetGameMasterHelpString())
-    } else if(command[0] == 'player') {
+    } else if (command[0] == 'player') {
         msg.reply(GetPlayerHelpString())
     }
 }
@@ -265,6 +303,8 @@ function StartGame(msg) {
         players[i].loc = 'sector' + Math.floor(i / 2);
     }
 
+    RegenEnergy();
+
     msg.reply('The game has started');
 }
 //#endregion
@@ -284,7 +324,9 @@ function registerPlayer(member) {
     })
     member.send('May the odds be ever in your favor.')
 }
-
+function selectTrait(msg) {
+    //TODO: add trait lookup array and selection logic
+}
 //#endregion
 
 //#region GM Actions
@@ -390,6 +432,7 @@ function PlayerLook(msg) {
     if (player != null) {
         let currentLoc = locations.find(x => player.loc == x.name);
         if (currentLoc != null) {
+            HandleEnergyRequirements(msg, player, 'look');
             let reply = `Current Location:  ${currentLoc.name} | `
             reply += GetLocationItemsString(currentLoc) + ' | ';
             reply += GetConnectedLocationsString(currentLoc) + ' | ';
@@ -413,6 +456,7 @@ function PickUp(msg, target) {
             if (itemName != null) {
                 let item = itemLookup.find(x => x.name == itemName);
                 if (item != null) {
+                    HandleEnergyRequirements(msg, player, 'pickup');
                     if (player.invWeight + item.weight < 2) {
                         player.invWeight += item.weight;
                         player.inv.push(itemName);
@@ -441,6 +485,7 @@ function Move(msg, target) {
             }
             let newLocation = loc.connectedLoc.find((x) => { return x == target });
             if (newLocation != null) {
+                HandleEnergyRequirements(msg, player, 'move');
                 player.loc = newLocation;
                 msg.reply('Player moved to ' + newLocation);
             } else {
@@ -464,6 +509,7 @@ function Drop(msg, target) {
             if (itemName != null) {
                 let itemInfo = itemLookup.find((x) => { return x.name = itemName });
                 if (itemInfo != null) {
+                    HandleEnergyRequirements(msg, player, 'drop');
                     player.invWeight -= itemInfo.weight;
                     loc.items.push(itemName);
                     player.inv = player.inv.filter((x) => { return x != itemName });
@@ -492,6 +538,7 @@ function Use(msg, target) {
             if (itemName != null) {
                 let itemInfo = itemLookup.find((x) => { return x.name == itemName });
                 if (itemInfo != null && itemInfo.type == 'consumable') {
+                    HandleEnergyRequirements(msg, player, 'use');
                     if (itemInfo.subType == 'health') {
                         player.health = Math.min(itemInfo.value + player.health, 100);
 
@@ -512,6 +559,7 @@ function Status(msg) {
     let id = msg.author.id;
     let player = players.find((x) => { return x.playerId == id })
     if (player != null) {
+        HandleEnergyRequirements(msg, player, 'status');
         let reply = 'Status - ';
         reply += GetPlayerStatsString(player);
         reply += ' | ' + GetPlayerItemsString(player);
@@ -530,6 +578,7 @@ function Equip(msg, target) {
         if (itemName != null) {
             let itemInfo = itemLookup.find((x) => { return x.name == itemName });
             if (itemInfo != null) {
+                HandleEnergyRequirements(msg, player, 'equip');
                 if (itemInfo.type == 'weapon') {
                     player.equippedItem = itemInfo.name;
                 }
@@ -549,12 +598,13 @@ function Attack(msg, target) {
                 msg.reply(reply);
                 return;
             }
-            let otherPlayer = players.find((x)=> {return x.name == target});
-            if(otherPlayer != null) {
-                let canCounter = PlayerAttack(msg,player,otherPlayer);
-                if(canCounter) {
-                    if(Math.floor(Math.random() * 100) >= 10) {
-                        PlayerAttack(msg,otherPlayer,player);
+            let otherPlayer = players.find((x) => { return x.name == target });
+            if (otherPlayer != null) {
+                HandleEnergyRequirements(msg, player, 'attack');
+                let canCounter = PlayerAttack(msg, player, otherPlayer);
+                if (canCounter) {
+                    if (Math.floor(Math.random() * 100) >= 10) {
+                        PlayerAttack(msg, otherPlayer, player);
                     }
                 }
             }
@@ -574,16 +624,16 @@ function RemovePlayer(msg, player) {
 }
 
 function PlayerAttack(msg, attacker, target) {
-    let equippedItemInfo = itemLookup.find((x)=>{return x.name == attacker.equippedItem});
+    let equippedItemInfo = itemLookup.find((x) => { return x.name == attacker.equippedItem });
     let canCounter = equippedItemInfo == null || equippedItemInfo.subType == 'melee';
-    if(equippedItemInfo == null) {
-        DamagePlayer(msg,target,meeleDamage);
-    } else if(equippedItemInfo.subType == 'melee') {
-        DamagePlayer(msg,target,equippedItemInfo.value);
+    if (equippedItemInfo == null) {
+        DamagePlayer(msg, target, meeleDamage);
+    } else if (equippedItemInfo.subType == 'melee') {
+        DamagePlayer(msg, target, equippedItemInfo.value);
     } else {
-        let ammo = attacker.inv.find((x)=> x == equippedItemInfo.name + '-ammo');
-        if(ammo != null) {
-            DamagePlayer(msg,target,equippedItemInfo.value);
+        let ammo = attacker.inv.find((x) => x == equippedItemInfo.name + '-ammo');
+        if (ammo != null) {
+            DamagePlayer(msg, target, equippedItemInfo.value);
         }
     }
     return canCounter;
@@ -605,6 +655,17 @@ function SendMessageToUserById(id, message) {
 function SendMessageToChannelById(id, message) {
     let channel = client.channels.cache.get(id);
     channel.send(message);
+}
+
+function HandleEnergyRequirements(msg, player, actionName) {
+    let actionInfo = energyCostLookup.find((X) => {return X.name == actionName})
+    if (player.energy < actionInfo.cost) {
+        msg.reply(`You do not have the energy to preform ${actionName}. Required energy: ${actionInfo.cost}`)
+        return false;
+    } else {
+        player.energy -= actionInfo.cost;
+    }
+    return true;
 }
 
 function EndGame() {
@@ -654,7 +715,7 @@ function GetGameMasterHelpString() {
     reply += '\n!gm hazard (hazard name) - Cause a hazard in a specified location.';
     reply += '\n!gm list (info type) - List information about the current game.';
     reply += '\n!gm end - Ends the current game.';
-    return reply;  
+    return reply;
 }
 function GetPlayerHelpString() {
     let reply = 'The follow commands are used by the player to play the game.'
@@ -665,7 +726,7 @@ function GetPlayerHelpString() {
     reply += '\n!p status - Displays the curretn status of your character.';
     reply += '\n!gm equip - Equip a weapon in your inventory.';
     reply += '\n!gm attack - Attack another player at your current location.';
-    return reply;  
+    return reply;
 }
 function GetOpenLocationsString() {
     var reply = 'Locations: ';
@@ -821,5 +882,15 @@ function GetHazardListString() {
 }
 //#endregion
 
+//#region async methods
+async function RegenEnergy() {
+    while (gameState == 'in-progress') {
+        players.forEach(element => {
+            element.energy = Math.min(100, element.energy + 1);
+        });
+        await delayForSeconds(5);
+    }
+}
+//#endregion
 // client.login logs the bot in and sets it up for use. You'll enter your token here.
 client.login('OTczMzExNDM5ODE1MjA5MDAw.Gqfqbi.XDB3kiJyXV8b2LzjTp8hENQqyhMwqZlajhrcSE');
