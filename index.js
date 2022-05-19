@@ -5,11 +5,6 @@ const meeleDamage = 3;
 
 let AllPlayers = {};
 let games = {};
-let GmId;
-let ServerId;
-let players = [];
-let locations = [];
-let gameState = 'none';
 let basicItemLookup = [{
     name: 'bat',
     type: 'weapon',
@@ -88,6 +83,7 @@ let basicEnergyCostLookup = [{
     name: 'attack',
     cost: 30
 }]
+let basicTraitLookup = ['boxer', 'nurse', 'sharpshooter', 'runner', 'martialArtist']
 
 // Register an event so that when the bot is ready, it will log a messsage to the terminal
 client.on('ready', () => {
@@ -132,13 +128,11 @@ async function sendHelloAfterDeley(msg) {
 
 //#region Command Handlers
 function HandleGMCommands(msg, ...command) {
+    //Validate we have commands to use
     if (command.length == 0)
         return;
-    if (command[0] != 'setup') {
-        if (GmId != GetUserId(msg)) {
-            return;
-        }
-    }
+
+    //Validate commands are gomming from proper channel
     if (msg.channel.type == 'DM' &&
         (command[0] == 'setup' || command[0] == 'start' || command[0] == 'end')) {
         msg.reply('Please setup, start, and end the game using the main channel and not DMs')
@@ -151,32 +145,42 @@ function HandleGMCommands(msg, ...command) {
         return;
     }
 
+    //Get current info for player and game
+    var currentGame = games[GetServerId(msg)];
+    var currentPlayer = AllPlayers[GetUserId(msg)]
+
+
+    //Handle setup command and validation for existing game and player
     if (command[0] == 'setup') {
-        if (gameState == 'none') {
+        if (!currentPlayer && !currentGame) {
             StartSetup(msg);
         } else {
-            msg.reply('Please end the game before starting a new one.')
+            msg.reply('Either you are in a game or the server already has a game running. You can not create a new game due to this.')
         }
-    } else if (command[0] == 'start') {
-        if (gameState == 'setup' && players.length >= 1) {
+    } else {
+        if (!currentPlayer || !currentGame) {
+            return;
+        }
+    }
+
+    if (command[0] == 'start') {
+        if (currentGame.gameState == 'setup' && currentGame.players.length >= 1) {
             StartGame(msg);
         } else {
             msg.reply('Please finish setup with at least one player before starting game.')
         }
     } else if (command[0] == 'end') {
         EndGame();
-        msg.reply('Game has been ended.')
     } else if (command[0] == 'drop') {
-        DropSupplies(msg, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
-
+        DropSupplies(msg, currentGame, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
     } else if (command[0] == 'kill') {
-        KillPlayer(msg, command.length < 2 ? '' : command[1]);
+        KillPlayer(msg, currentGame, command.length < 2 ? '' : command[1]);
     } else if (command[0] == 'hazard') {
-        Hazard(msg, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
+        Hazard(msg, currentGame, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
     } else if (command[0] == 'close') {
-        Close(msg, command.length < 2 ? '' : command[1], command.length < 3 ? '' : command[2]);
+        Close(msg, currentGame, command.length < 2 ? '' : command[1], command.length < 3 ? '' : command[2]);
     } else if (command[0] == 'list') {
-        List(msg, command.length < 2 ? null : command[1], command.length < 3 ? null : command[2]);
+        List(msg, currentGame, command.length < 2 ? null : command[1], command.length < 3 ? null : command[2]);
     }
 }
 
@@ -185,20 +189,9 @@ function HandlePlayerCommands(msg, ...command) {
     if (command.length == 0)
         return;
 
-    //Enroling feedback
-    if (command[0] != 'enroll') {
-        let id = GetUserId(msg);
-        let player = players.find((x) => { return x.playerId == id })
-        if (player == null) {
-            if (gameState == 'setup')
-                msg.reply('Please use enroll command in the main chat to enroll as a player in the game.');
-            else if (gameState == 'none')
-                msg.reply('No game is in progress. Please start game setup before enrolling');
-            else if (gameState == 'in-progress')
-                msg.reply('Game is in progress. End the current game and start setup before enrolling');
-            return;
-        }
-    }
+    //Get current info for player and game
+    var currentGame = games[GetServerId(msg)];
+    var currentPlayer = AllPlayers[GetUserId(msg)]
 
     //Check message origin
     if (msg.channel.type == 'DM' &&
@@ -213,31 +206,38 @@ function HandlePlayerCommands(msg, ...command) {
         return;
     }
 
-    //command handlers
+    //Enroling feedback
     if (command[0] == 'enroll') {
-        if (gameState == 'setup') {
-            registerPlayer(msg.member);
-        } else {
-            msg.member.send('Game can not be joined at the moment')
+        if (currentPlayer == null) {
+            if (!currentGame) {
+                msg.reply('No game is in progress. Please start game setup before enrolling');
+            } else if (currentGame.gameState == 'setup')
+                registerPlayer(msg.member);
+            else if (currentGame.gameState == 'in-progress')
+                msg.reply('Game is in progress. End the current game and start setup before enrolling');
+            return;
         }
-    } else if (command[0] == 'selectTrait') {
-        selectTrait(msg);
+    }
+
+    //command handlers
+    if (command[0] == 'selectTrait') {
+        selectTrait(msg, currentGame);
     } else if (command[0] == 'look') {
-        PlayerLook(msg);
+        PlayerLook(msg, currentGame);
     } else if (command[0] == 'pickup') {
-        PickUp(msg, command.length > 1 ? command[1] : '');
+        PickUp(msg, currentGame, command.length > 1 ? command[1] : '');
     } else if (command[0] == 'move') {
-        Move(msg, command.length > 1 ? command[1] : '');
+        Move(msg, currentGame, command.length > 1 ? command[1] : '');
     } else if (command[0] == 'drop') {
-        Drop(msg, command.length > 1 ? command[1] : '');
+        Drop(msg, currentGame, command.length > 1 ? command[1] : '');
     } else if (command[0] == 'use') {
-        Use(msg, command.length > 1 ? command[1] : '');
+        Use(msg, currentGame, command.length > 1 ? command[1] : '');
     } else if (command[0] == 'status') {
-        Status(msg);
+        Status(msg, currentGame);
     } else if (command[0] == 'equip') {
-        Equip(msg, command.length > 1 ? command[1] : null);
+        Equip(msg, currentGame, command.length > 1 ? command[1] : null);
     } else if (command[0] == 'atack') {
-        Attack(msg, command.length > 1 ? command[1] : null);
+        Attack(msg, currentGame, command.length > 1 ? command[1] : null);
     }
 }
 
@@ -295,8 +295,20 @@ function registerPlayer(member) {
     players.push(new Player(member));
     member.send('May the odds be ever in your favor.')
 }
-function selectTrait(msg) {
-    //TODO: add trait lookup array and selection logic
+function selectTrait(msg, game, trait) {
+    if (game.gameState == 'setup') {
+        let id = GetUserId(msg);
+        let player = game.players.find((x) => { return x.playerId == id });
+        if (player != null) {
+            if (trait == null) {
+                msg.reply(GetTraitsString())
+            }
+            let traitInfo = basicTraitLookup.find((x) => { return x == trait });
+            if (traitInfo != null) {
+                player.trait = traitInfo;
+            }
+        }
+    }
 }
 //#endregion
 
@@ -318,25 +330,25 @@ function createBasicLevel() {
         } else {
             connected.push('sector' + (i + 1));
         }
-        locations.push(new Location(name, {itemsToAdd: [],connectedLocations: connected }));
+        locations.push(new Location(name, { itemsToAdd: [], connectedLocations: connected }));
     }
     let itemsToAdd = ['bat', 'knife', 'pistol', 'pistol-ammo', 'medkit', 'food'];
-    locations.push(Location('cornucopian',{itemsToAdd: itemsToAdd,connectedLocations: LocList}));
+    locations.push(Location('cornucopian', { itemsToAdd: itemsToAdd, connectedLocations: LocList }));
     return locations
 }
 //#endregion
 
 //#region GM Actions
-function DropSupplies(msg, target, itemName) {
+function DropSupplies(msg, currentGame, target, itemName) {
     let id = GetUserId(msg);
     if (id == GmId) {
         if (target == '') {
-            let reply = 'Possible ' + GetOpenLocationsString();
-            reply += 'Possible ' + GetItemLookupListString();
+            let reply = 'Possible ' + GetOpenLocationsString(currentGame);
+            reply += 'Possible ' + GetItemLookupListString(currentGame);
             return;
         }
-        let loc = locations.find((x) => { return x.name == target });
-        let itemData = itemLookup.find((x) => { return x.name == itemName })
+        let loc = currentGame.locations.find((x) => { return x.name == target });
+        let itemData = currentGame.itemLookup.find((x) => { return x.name == itemName })
         if (loc != null && itemData != null) {
             loc.items.push(itemData);
         } else {
@@ -344,45 +356,45 @@ function DropSupplies(msg, target, itemName) {
         }
     }
 }
-function KillPlayer(msg, target) {
+function KillPlayer(msg, currentGame, target) {
     if (target == '') {
-        let reply = 'Possible' + GetPlayersString();
+        let reply = 'Possible' + GetPlayersString(currentGame);
         msg.reply(reply);
         return;
     }
-    let player = players.find((x) => { return x.name == target });
+    let player = currentGame.players.find((x) => { return x.name == target });
     if (player != null) {
-        RemovePlayer(msg, player);
+        RemovePlayer(msg, currentGame, player);
     }
 }
-function Hazard(msg, targetLocation, targetHazard) {
+function Hazard(msg, game, targetLocation, targetHazard) {
     if (targetLocation == '' || targetHazard == '') {
-        let reply = 'Possible ' + GetOpenLocationsString();
-        reply += ' | Possible ' + GetHazardListString();
+        let reply = 'Possible ' + GetOpenLocationsString(game);
+        reply += ' | Possible ' + GetHazardListString(game);
         msg.reply(reply);
         return;
     }
-    let loc = locations.find((x) => { return x.name == targetLocation });
-    let hazardInfo = hazardLookup.find((x) => { return x.name == targetHazard });
+    let loc = game.locations.find((x) => { return x.name == targetLocation });
+    let hazardInfo = game.hazardLookup.find((x) => { return x.name == targetHazard });
     if (loc != null && hazardInfo != null) {
-        let playerList = players.filter((x) => { return x.loc = loc.name });
+        let playerList = game.players.filter((x) => { return x.loc = loc.name });
         for (let i = 0; i < playerList.length; i++) {
             DamagePlayer(msg, playerList[i], hazardInfo.value);
         }
     }
 }
-function Close(msg, targetLocation, moveType) {
+function Close(msg, game, targetLocation, moveType) {
     if (targetLocation == '') {
-        let reply = GetOpenLocationsString();
+        let reply = GetOpenLocationsString(game);
         msg.reply(reply);
         return;
     }
-    let loc = locations.find((x) => { return x.name == targetLocation });
+    let loc = game.locations.find((x) => { return x.name == targetLocation });
     if (loc != null) {
-        let playerList = players.filter((x) => { return x.loc == loc.name });
+        let playerList = game.players.filter((x) => { return x.loc == loc.name });
         for (let i = 0; i < playerList.length; i++) {
             if (moveType == 'kill')
-                RemovePlayer(msg, playerList[i]);
+                RemovePlayer(msg, game, playerList[i]);
             else {
                 playerList[i].loc = loc.connectedLoc[0];
                 loc.closed = true;
@@ -391,15 +403,15 @@ function Close(msg, targetLocation, moveType) {
         }
     }
 }
-function List(msg, command, argument) {
+function List(msg, game, command, argument) {
     if (command == null) {
         let reply = 'Possible options: players, playerInfo (player name), locations, locationInfo (location name)';
         msg.reply(reply);
     } else if (command == 'players') {
-        let reply = GetPlayersString();
+        let reply = GetPlayersString(game);
         msg.reply(reply);
     } else if (command == 'playerInfo' && argument != null) {
-        let player = players.find((x) => x.name = argument);
+        let player = game.players.find((x) => x.name = argument);
         if (player != null) {
             let reply = 'Status - ';
             reply += GetPlayerStatsString(player);
@@ -407,15 +419,15 @@ function List(msg, command, argument) {
             msg.reply(reply);
         }
     } else if (command == 'locations') {
-        let reply = GetOpenLocationsString();
+        let reply = GetOpenLocationsString(game);
         msg.reply(reply);
     } else if (command == 'locationInfo' && argument != null) {
-        let location = locations.find((x) => { return x.name = argument })
+        let location = game.locations.find((x) => { return x.name = argument })
         if (location != null) {
             let reply = 'Location Name: ' + location.name;
-            reply += ' | ' + GetConnectedLocationsString(location);
+            reply += ' | ' + GetConnectedLocationsString(location, game);
             reply += ' | ' + GetLocationItemsString(location);
-            reply += ' | ' + GetLocationPlayersString(location);
+            reply += ' | ' + GetLocationPlayersString(location, game);
             msg.reply(reply);
         }
     }
@@ -423,26 +435,26 @@ function List(msg, command, argument) {
 //#endregion
 
 //#region Player Actions
-function PlayerLook(msg) {
-    let id = msg.author.id;
-    let player = players.find((x) => { return x.playerId == id })
+function PlayerLook(msg, game) {
+    let id = GetUserId(msg);
+    let player = game.players.find((x) => { return x.playerId == id })
     if (player != null) {
-        let currentLoc = locations.find(x => player.loc == x.name);
+        let currentLoc = game.locations.find(x => player.loc == x.name);
         if (currentLoc != null) {
-            HandleEnergyRequirements(msg, player, 'look');
+            HandleEnergyRequirements(msg, game, player, 'look');
             let reply = `Current Location:  ${currentLoc.name} | `
             reply += GetLocationItemsString(currentLoc) + ' | ';
-            reply += GetConnectedLocationsString(currentLoc) + ' | ';
-            reply += GetOtherPlayerListString(player);
+            reply += GetConnectedLocationsString(currentLoc, game) + ' | ';
+            reply += GetOtherPlayerListString(player, game);
             msg.reply(reply);
         }
     }
 }
-function PickUp(msg, target) {
-    let id = msg.author.id;
-    let player = players.find((x) => { return x.playerId == id })
+function PickUp(msg, game, target) {
+    let id = GetUserId(msg);
+    let player = game.players.find((x) => { return x.playerId == id })
     if (player != null) {
-        let loc = locations.find((x) => { return x.name == player.loc });
+        let loc = game.locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
                 let reply = GetLocationItemsString(loc);
@@ -451,7 +463,7 @@ function PickUp(msg, target) {
             }
             let item = loc.items.find((x) => { return x.name == target });
             if (item != null) {
-                HandleEnergyRequirements(msg, player, 'pickup');
+                HandleEnergyRequirements(msg, game, player, 'pickup');
                 if (player.invWeight + item.weight < 2) {
                     player.invWeight += item.weight;
                     player.inv.push(item);
@@ -466,20 +478,20 @@ function PickUp(msg, target) {
         }
     }
 }
-function Move(msg, target) {
-    let id = msg.author.id;
-    let player = players.find((x) => { return x.playerId == id })
+function Move(msg, game, target) {
+    let id = GetUserId(msg);
+    let player = game.players.find((x) => { return x.playerId == id })
     if (player != null) {
-        let loc = locations.find((x) => { return x.name == player.loc });
+        let loc = game.locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
-                let reply = GetConnectedLocationsString(loc);
+                let reply = GetConnectedLocationsString(loc, game);
                 msg.reply(reply);
                 return;
             }
             let newLocation = loc.connectedLoc.find((x) => { return x == target });
             if (newLocation != null) {
-                HandleEnergyRequirements(msg, player, 'move');
+                HandleEnergyRequirements(msg, game, player, 'move');
                 player.loc = newLocation;
                 msg.reply('Player moved to ' + newLocation);
             } else {
@@ -488,23 +500,23 @@ function Move(msg, target) {
         }
     }
 }
-function Drop(msg, target) {
-    let id = msg.author.id;
-    let player = players.find((x) => { return x.playerId == id })
+function Drop(msg, game, target) {
+    let id = GetUserId(msg);
+    let player = game.players.find((x) => { return x.playerId == id })
     if (player != null) {
-        let loc = locations.find((x) => { return x.name == player.loc });
+        let loc = game.locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
                 let reply = 'Droppable  ' + GetPlayerItemsString(player);
                 msg.reply(reply);
                 return;
             }
-            let itemInfo = itemLookup.find((x) => { return x.name = itemName });
+            let itemInfo = game.itemLookup.find((x) => { return x.name = itemName });
             if (itemInfo != null) {
-                HandleEnergyRequirements(msg, player, 'drop');
+                HandleEnergyRequirements(msg, game, player, 'drop');
                 player.invWeight -= itemInfo.weight;
                 loc.items.push(itemInfo);
-                RemoveItemFromPlayer(player, itemInfo.name);
+                RemoveItemFromPlayer(player, game, itemInfo.name);
                 if (player.equippedItem == itemInfo.name) {
                     player.equippedItem = 'none';
                 }
@@ -514,21 +526,21 @@ function Drop(msg, target) {
         }
     }
 }
-function Use(msg, target) {
-    let id = msg.author.id;
-    let player = players.find((x) => { return x.playerId == id })
+function Use(msg, game, target) {
+    let id = GetUserId(msg);
+    let player = game.players.find((x) => { return x.playerId == id })
     if (player != null) {
-        let loc = locations.find((x) => { return x.name == player.loc });
+        let loc = game.locations.find((x) => { return x.name == player.loc });
         if (loc != null) {
             if (target == '') {
-                let reply = 'Usable ' + GetPlayerUsableItemsString(player);
+                let reply = 'Usable ' + GetPlayerUsableItemsString(player, game);
                 msg.reply(reply);
                 return;
             }
-            let itemInfo = itemLookup.find((x) => { return x.name == target });
+            let itemInfo = game.itemLookup.find((x) => { return x.name == target });
             if (itemInfo != null) {
                 if (itemInfo.type == 'consumable') {
-                    HandleEnergyRequirements(msg, player, 'use');
+                    HandleEnergyRequirements(msg, game, player, 'use');
                     if (itemInfo.subType == 'health') {
                         player.health = Math.min(itemInfo.value + player.health, 100);
 
@@ -545,49 +557,49 @@ function Use(msg, target) {
         }
     }
 }
-function Status(msg) {
-    let id = msg.author.id;
-    let player = players.find((x) => { return x.playerId == id })
+function Status(msg, game) {
+    let id = GetUserId(msg);
+    let player = game.players.find((x) => { return x.playerId == id })
     if (player != null) {
-        HandleEnergyRequirements(msg, player, 'status');
+        HandleEnergyRequirements(msg, game, player, 'status');
         let reply = 'Status - ';
         reply += GetPlayerStatsString(player);
         reply += ' | ' + GetPlayerItemsString(player);
         msg.reply(reply);
     }
 }
-function Equip(msg, target) {
+function Equip(msg, game, target) {
     let id = GetUserId(msg);
-    let player = players.find((x) => { return x.playerId == id });
+    let player = game.players.find((x) => { return x.playerId == id });
     if (player != null) {
         if (target == null) {
-            let reply = 'Equipable ' + GetPlayerEquipableItemsString(player);
+            let reply = 'Equipable ' + GetPlayerEquipableItemsString(player, game);
             msg.reply(reply);
         }
         let itemInfo = player.inv.find((x) => { return x.name == target });
         if (itemInfo != null) {
             if (itemInfo.type == 'weapon') {
-                HandleEnergyRequirements(msg, player, 'equip');
+                HandleEnergyRequirements(msg, game, player, 'equip');
                 player.equippedItem = itemInfo.name;
             }
         }
     }
 }
-function Attack(msg, target) {
+function Attack(msg, game, target) {
     let id = GetUserId(msg);
-    let player = players.find((X) => { return X.playerId == id });
+    let player = game.players.find((X) => { return X.playerId == id });
     if (player != null) {
-        locationInfo = locations.find((x) => { return x.name == player.loc });
+        locationInfo = game.locations.find((x) => { return x.name == player.loc });
         if (locationInfo != null) {
             if (target == null) {
-                filteredPlayers = players.filter((x) => { return x.loc == locationInfo.name && x.playerId != id });
-                let reply = GetOtherPlayerListString(player);
+                filteredPlayers = game.players.filter((x) => { return x.loc == locationInfo.name && x.playerId != id });
+                let reply = GetOtherPlayerListString(player, game);
                 msg.reply(reply);
                 return;
             }
-            let otherPlayer = players.find((x) => { return x.name == target });
+            let otherPlayer = game.players.find((x) => { return x.name == target });
             if (otherPlayer != null) {
-                HandleEnergyRequirements(msg, player, 'attack');
+                HandleEnergyRequirements(msg, game, player, 'attack');
                 let canCounter = PlayerAttack(msg, player, otherPlayer);
                 if (canCounter) {
                     if (Math.floor(Math.random() * 100) >= 10) {
@@ -601,43 +613,43 @@ function Attack(msg, target) {
 //#endregion
 
 //#region Helper methods
-function RemovePlayer(msg, player) {
+function RemovePlayer(msg, game, player) {
     SendMessageToUserById(player.playerId, 'You have been smited and are removed from the game')
-    let location = locations.find((x) => { return x.name == player.loc });
+    let location = game.locations.find((x) => { return x.name == player.loc });
     if (location != null) {
-        players.inv.forEach(element => {
+        player.inv.forEach(element => {
             location.items.push(element);
         });
     }
-    players = players.filter((x) => x.playerId != player.playerId)
+    players = game.players.filter((x) => x.playerId != player.playerId)
     //TODO: Put message in the info channel
     if (players.length <= 1) {
-        EndGame(msg.guildId);
+        EndGame(game.ServerId);
     }
 }
 
-function PlayerAttack(msg, attacker, target) {
-    let equippedItemInfo = itemLookup.find((x) => { return x.name == attacker.equippedItem });
+function PlayerAttack(msg, game, attacker, target) {
+    let equippedItemInfo = game.itemLookup.find((x) => { return x.name == attacker.equippedItem });
     let canCounter = equippedItemInfo == null || equippedItemInfo.subType == 'melee';
     if (equippedItemInfo == null) {
-        DamagePlayer(msg, target, meeleDamage);
+        DamagePlayer(msg, game, target, meeleDamage);
     } else if (equippedItemInfo.subType == 'melee') {
-        DamagePlayer(msg, target, equippedItemInfo.value);
+        DamagePlayer(msg, game, target, equippedItemInfo.value);
     } else {
         let ammo = attacker.inv.find((x) => x == equippedItemInfo.name + '-ammo');
         if (ammo != null) {
-            DamagePlayer(msg, target, equippedItemInfo.value);
+            DamagePlayer(msg, game, target, equippedItemInfo.value);
             RemoveItemFromPlayer(attacker, equippedItemInfo.name + '-ammo');
         }
     }
     return canCounter;
 }
 
-function DamagePlayer(msg, player, damage) {
+function DamagePlayer(msg, game, player, damage) {
     player.health -= damage;
     SendMessageToUserById(player.playerId, `You have received ${damage} damage`)
     if (player.health <= 0) {
-        RemovePlayer(msg, player)
+        RemovePlayer(msg, game, player)
     }
 }
 
@@ -658,8 +670,8 @@ function SendMessageToChannelById(id, message) {
     channel.send(message);
 }
 
-function HandleEnergyRequirements(msg, player, actionName) {
-    let actionInfo = energyCostLookup.find((X) => { return X.name == actionName })
+function HandleEnergyRequirements(msg, game, player, actionName) {
+    let actionInfo = game.energyCostLookup.find((X) => { return X.name == actionName })
     if (player.energy < actionInfo.cost) {
         msg.reply(`You do not have the energy to preform ${actionName}. Required energy: ${actionInfo.cost}`)
         return false;
@@ -671,16 +683,15 @@ function HandleEnergyRequirements(msg, player, actionName) {
 
 function EndGame(ServerId) {
     //TODO: put End game message in info channel
-    GmId = null;
-    ServerId = null;
-    gameState = 'none';
-    players = [];
-    locations = [];
     games[ServerId] = undefined;
 }
 
 function GetUserId(msg) {
     return msg.mem == null ? msg.author == null ? '' : msg.author.id : msg.mem.user.id;
+}
+
+function GetServerId(msg) {
+    return msg.guildId;
 }
 
 function delayForSeconds(sec) {
@@ -733,9 +744,18 @@ function GetPlayerHelpString() {
     reply += '\n!gm attack (player name) - Attack another player at your current location.';
     return reply;
 }
-function GetOpenLocationsString() {
+function GetTraitsString() {
+    let reply = 'Possible traits for your character:';
+    reply += `\nboxer: deal extra unarmed damage.`;
+    reply += `\nnurse: heal extra health with medkit.`;
+    reply += `\nsharpshooter: less chance to miss a shot fired from a gun.`;
+    reply += `\nrunner: Have more max stamina.`;
+    reply += `\nmartialArtest: better chance to counter attack when reciving a melee attack.`;
+    return reply;
+}
+function GetOpenLocationsString(game) {
     var reply = 'Locations: ';
-    let filteredLocations = locations.filter((x) => { return !x.closed })
+    let filteredLocations = game.locations.filter((x) => { return !x.closed })
     for (let i = 0; i < filteredLocations.length; i++) {
         reply += filteredLocations[i].name + ',';
     }
@@ -744,13 +764,13 @@ function GetOpenLocationsString() {
     }
     return reply;
 }
-function GetConnectedLocationsString(loc) {
+function GetConnectedLocationsString(loc, game) {
     let reply = 'Connected Locations: ';
     if (loc.connectedLoc.length == 0) {
         reply += 'None'
     }
     for (let i = 0; i < loc.connectedLoc.length; i++) {
-        locInfo = locations.find((x) => { return x.name == loc.connectedLoc[i] })
+        locInfo = game.locations.find((x) => { return x.name == loc.connectedLoc[i] })
         if (locInfo != null && !locInfo.closed) {
             reply += loc.connectedLoc[i] + ',';
         }
@@ -771,9 +791,9 @@ function GetLocationItemsString(location) {
         reply = reply.slice(0, reply.length(-1))
     return reply
 }
-function GetLocationPlayersString(location) {
+function GetLocationPlayersString(location, game) {
     let reply = 'Players: ';
-    PlayerList = players.filter((x) => { return x.loc = location })
+    PlayerList = game.players.filter((x) => { return x.loc = location })
     if (PlayerList.length == 0) {
         reply += 'None';
     }
@@ -785,10 +805,10 @@ function GetLocationPlayersString(location) {
     }
     return reply;
 }
-function GetPlayersString() {
+function GetPlayersString(game) {
     let reply = 'Players:  ';
-    for (let i = 0; i < players.length; i++) {
-        reply += players[i].name + ',';
+    for (let i = 0; i < game.players.length; i++) {
+        reply += game.players[i].name + ',';
     }
     if (reply.charAt(reply.length - 1) == ',') {
         reply = reply.slice(0, reply.length - 1);
@@ -808,13 +828,13 @@ function GetPlayerItemsString(player) {
     }
     return reply;
 }
-function GetPlayerUsableItemsString(player) {
+function GetPlayerUsableItemsString(player, game) {
     reply = 'Items: '
     if (player.inv.length == 0) {
         reply += 'None';
     }
     for (let i = 0; i < player.inv.length; i++) {
-        let itemInfo = itemLookup.find((x) => { return x.name == player.inv[i].name });
+        let itemInfo = game.itemLookup.find((x) => { return x.name == player.inv[i].name });
         if (itemInfo.type == 'consumable' && itemInfo.subType != 'ammo') {
             reply += player.inv[i].name + ',';
         }
@@ -824,11 +844,11 @@ function GetPlayerUsableItemsString(player) {
     }
     return reply;
 }
-function GetPlayerEquipableItemsString(player) {
+function GetPlayerEquipableItemsString(player, game) {
     reply = 'Items: '
     var itemCount = 0
     for (let i = 0; i < player.inv.length; i++) {
-        let itemInfo = itemLookup.find((x) => { return x.name == player.inv[i].name });
+        let itemInfo = game.itemLookup.find((x) => { return x.name == player.inv[i].name });
         if (itemInfo.type == 'weapon') {
             reply += player.inv[i].name + ',';
             itemCount++;
@@ -851,19 +871,19 @@ function GetPlayerStatsString(player) {
     reply += '\nEquipped Item: ' + player.equippedItem;
     return reply;
 }
-function GetItemLookupListString() {
+function GetItemLookupListString(game) {
     reply += 'Items: ';
-    for (let i = 0; i < itemLookup.length; i++) {
-        reply += itemLookup[i].name + ',';
+    for (let i = 0; i < game.itemLookup.length; i++) {
+        reply += game.itemLookup[i].name + ',';
     }
     if (reply.charAt(reply.length - 1) == ',') {
         reply = reply.slice(0, reply.length - 1);
     }
     return reply;
 }
-function GetOtherPlayerListString(player) {
+function GetOtherPlayerListString(player, game) {
     reply += 'Players: ';
-    PlayerList = players.filter((x) => { return x.loc = player.loc && player.name != x.name })
+    PlayerList = game.players.filter((x) => { return x.loc = player.loc && player.name != x.name })
     if (PlayerList.length == 0) {
         reply += 'None';
     }
@@ -875,10 +895,10 @@ function GetOtherPlayerListString(player) {
     }
     return reply;
 }
-function GetHazardListString() {
+function GetHazardListString(game) {
     reply += 'Hazards: ';
-    for (let i = 0; i < hazardLookup.length; i++) {
-        reply += hazardLookup[i].name + ',';
+    for (let i = 0; i < game.hazardLookup.length; i++) {
+        reply += game.hazardLookup[i].name + ',';
     }
     if (reply.charAt(reply.length - 1) == ',') {
         reply = reply.slice(0, reply.length - 1);
@@ -902,13 +922,13 @@ async function RegenEnergy(currentGame) {
 function Player(member) {
     this.playerId = member.user.id;
     this.name = member.user.username,
-    this.health = 100,
-    this.energy = 100,
-    this.loc = 'none',
-    this.trait = 'none',
-    this.invWeight = 0,
-    this.inv = [],
-    this.equippedItem = 'none'
+        this.health = 100,
+        this.energy = 100,
+        this.loc = 'none',
+        this.trait = 'none',
+        this.invWeight = 0,
+        this.inv = [],
+        this.equippedItem = 'none'
 }
 function Location(name, itemAndLocationObject) {
     this.name = name;
@@ -925,9 +945,9 @@ function Game(GmId, ServerId) {
     this.players = [];
     this.locations = [];
     this.gameState = 'None';
-    this.itemLookup  = JSON.parse(JSON.stringify(basicItemLookup))
-    this.hazardLookup  = JSON.parse(JSON.stringify(basicHazardLookup))
-    this.energyCostLookup  = JSON.parse(JSON.stringify(basicEnergyCostLookup))
+    this.itemLookup = JSON.parse(JSON.stringify(basicItemLookup))
+    this.hazardLookup = JSON.parse(JSON.stringify(basicHazardLookup))
+    this.energyCostLookup = JSON.parse(JSON.stringify(basicEnergyCostLookup))
 }
 //#endregion
 // client.login logs the bot in and sets it up for use. You'll enter your token here.
