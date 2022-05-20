@@ -258,6 +258,16 @@ function HandleHelpCommands(msg, ...command) {
 
 //#region GM Setup Stuff
 function registerGM(msg) {
+    let role = msg.guild.roles.cache.get('BBGM')
+    if (role) {
+        role.members.forEach((member, i) => {
+            member.roles.remove(role);
+        })
+        msg.member.roles.add(role);
+    } else {
+        msg.reply('Could not start game because required role "BBGM" has not in the server')
+        return;
+    }
     GmId = msg.member.user.id;
     ServerId = msg.guildId;
     let newGame = new Game(GmId, ServerId);
@@ -306,6 +316,9 @@ function selectTrait(msg, game, trait) {
             let traitInfo = basicTraitLookup.find((x) => { return x == trait });
             if (traitInfo != null) {
                 player.trait = traitInfo;
+                if(traitInfo == 'runner') {
+                    player.energy = 120;
+                }
             }
         }
     }
@@ -542,8 +555,11 @@ function Use(msg, game, target) {
                 if (itemInfo.type == 'consumable') {
                     HandleEnergyRequirements(msg, game, player, 'use');
                     if (itemInfo.subType == 'health') {
-                        player.health = Math.min(itemInfo.value + player.health, 100);
-
+                        if (player.trait == 'nurse') {
+                            player.health = Math.min(itemInfo.value + 5 + player.health, 100);
+                        } else {
+                            player.health = Math.min(itemInfo.value + player.health, 100);
+                        }
                     } else if (itemInfo.subType == 'energy') {
                         player.energy = Math.min(itemInfo.value + player.energy, 100);
                     }
@@ -599,11 +615,14 @@ function Attack(msg, game, target) {
             }
             let otherPlayer = game.players.find((x) => { return x.name == target });
             if (otherPlayer != null) {
-                HandleEnergyRequirements(msg, game, player, 'attack');
-                let canCounter = PlayerAttack(msg, player, otherPlayer);
-                if (canCounter) {
-                    if (Math.floor(Math.random() * 100) >= 10) {
-                        PlayerAttack(msg, otherPlayer, player);
+                let attackInfo = PlayerAttack(msg, player, otherPlayer, false);
+                if(attackInfo.didAttack) {
+                    HandleEnergyRequirements(msg, game, player, 'attack');
+                }
+                if (attackInfo.canCounter) {
+                    let counterChance = otherPlayer.trait == 'martialArtest' ? 20 : 10;
+                    if (Math.floor(Math.random() * 100) <= counterChance) {
+                        PlayerAttack(msg, otherPlayer, player, true);
                     }
                 }
             }
@@ -628,21 +647,31 @@ function RemovePlayer(msg, game, player) {
     }
 }
 
-function PlayerAttack(msg, game, attacker, target) {
+function PlayerAttack(msg, game, attacker, target, isCounter) {
     let equippedItemInfo = game.itemLookup.find((x) => { return x.name == attacker.equippedItem });
     let canCounter = equippedItemInfo == null || equippedItemInfo.subType == 'melee';
+    let didAttack = true;
     if (equippedItemInfo == null) {
-        DamagePlayer(msg, game, target, meeleDamage);
+        if (player.trait == 'boxer') {
+            DamagePlayer(msg, game, target, meeleDamage * 2);
+        } else {
+            DamagePlayer(msg, game, target, meeleDamage);
+        }
     } else if (equippedItemInfo.subType == 'melee') {
         DamagePlayer(msg, game, target, equippedItemInfo.value);
-    } else {
+    } else if (!isCounter) {
         let ammo = attacker.inv.find((x) => x == equippedItemInfo.name + '-ammo');
         if (ammo != null) {
-            DamagePlayer(msg, game, target, equippedItemInfo.value);
-            RemoveItemFromPlayer(attacker, equippedItemInfo.name + '-ammo');
+            let hitChance = player.trait == 'sharpShooter' ? 95 : 80;
+            if (Math.floor(Math.random() * 100) <= hitChance) {
+                DamagePlayer(msg, game, target, equippedItemInfo.value);
+                RemoveItemFromPlayer(attacker, equippedItemInfo.name + '-ammo');
+            }
+        } else {
+            didAttack = false;
         }
     }
-    return canCounter;
+    return { canCounter: canCounter, didAttack: didAttack };
 }
 
 function DamagePlayer(msg, game, player, damage) {
@@ -684,6 +713,13 @@ function HandleEnergyRequirements(msg, game, player, actionName) {
 function EndGame(ServerId) {
     //TODO: put End game message in info channel
     games[ServerId] = undefined;
+    let role = msg.guild.roles.cache.find((r) => { return r.id == 'BBGM' });
+    if (role) {
+        let user = client.users.cache.get(id);
+        user.roles.remove(role);
+    } else {
+        return;
+    }
 }
 
 function GetUserId(msg) {
@@ -739,7 +775,7 @@ function GetPlayerHelpString() {
     reply += '\n!p pickup (item name)- Pick up a item that is at your current location';
     reply += '\n!gm move (location name) - Move to a location that is connected to your current location.';
     reply += `\n!p use (item name) - Use a consumable item in your inventory.`;
-    reply += '\n!p status - Displays the curretn status of your character.';
+    reply += '\n!p status - Displays the current status of your character.';
     reply += '\n!gm equip (item name) - Equip a weapon in your inventory.';
     reply += '\n!gm attack (player name) - Attack another player at your current location.';
     return reply;
@@ -747,10 +783,10 @@ function GetPlayerHelpString() {
 function GetTraitsString() {
     let reply = 'Possible traits for your character:';
     reply += `\nboxer: deal extra unarmed damage.`;
-    reply += `\nnurse: heal extra health with medkit.`;
+    reply += `\nnurse: heal extra health with healing items.`;
     reply += `\nsharpshooter: less chance to miss a shot fired from a gun.`;
     reply += `\nrunner: Have more max stamina.`;
-    reply += `\nmartialArtest: better chance to counter attack when reciving a melee attack.`;
+    reply += `\nmartialArtest: better chance to counter attack when receiving a melee attack.`;
     return reply;
 }
 function GetOpenLocationsString(game) {
@@ -911,7 +947,8 @@ function GetHazardListString(game) {
 async function RegenEnergy(currentGame) {
     while (currentGame.gameState == 'in-progress' && games[currentGame.ServerId]) {
         currentGame.players.forEach(element => {
-            element.energy = Math.min(100, element.energy + 1);
+            let maxEnergy =  element.trait == 'runner' ? 120 : 100;
+            element.energy = Math.min(maxEnergy, element.energy + 1);
         });
         await delayForSeconds(5);
     }
@@ -951,4 +988,4 @@ function Game(GmId, ServerId) {
 }
 //#endregion
 // client.login logs the bot in and sets it up for use. You'll enter your token here.
-client.login('OTczMzExNDM5ODE1MjA5MDAw.Gqfqbi.XDB3kiJyXV8b2LzjTp8hENQqyhMwq 
+client.login('OTczMzExNDM5ODE1MjA5MDAw.GKvoXb.ZZlANDlxldTzP6wP4AY2HAdTNKy9MJoJrM0_oE')
