@@ -50,6 +50,12 @@ let basicItemLookup = [{
 let basicHazardLookup = [{
     name: 'storm',
     value: '10'
+}, {
+    name: 'flood',
+    value: '20'
+}, {
+    name: 'fire',
+    value: 30
 }]
 let basicEnergyCostLookup = [{
     name: 'move',
@@ -114,11 +120,6 @@ client.on('message', async msg => {
     } else if (args[0] == '!p') {
         HandlePlayerCommands(msg, ...args.slice(1));
     }
-    // // Check if the message starts with '!hello' and respond with 'world!' if it does.
-    // if (msg.content.startsWith("!hello")) {
-    //     sendHelloAfterDeley(msg);
-    //     msg.reply('Hello, I hope you are having a wonderful day!')
-    // }
 });
 
 async function sendHelloAfterDeley(msg) {
@@ -135,12 +136,13 @@ function HandleGMCommands(msg, ...command) {
     //Validate commands are gomming from proper channel
     if (msg.channel.type == 'DM' &&
         (command[0] == 'setup' || command[0] == 'start' || command[0] == 'end')) {
-        msg.reply('Please setup, start, and end the game using the main channel and not DMs')
+        msg.reply('Please setup, start, and end the game using the bb-game-setup channel and not DMs')
         return;
     }
     if (msg.channel.type != 'DM' &&
-        (command[0] == 'drop' || command[0] == 'pickup' ||
-            command[0] == 'move' || command[0] == 'drop')) {
+        (command[0] == 'drop' || command[0] == 'kill' ||
+            command[0] == 'hazard' || command[0] == 'close' ||
+            command[0] == 'list')) {
         msg.member.send('You should DM the bot to keep GM actions hidden')
         return;
     }
@@ -148,7 +150,6 @@ function HandleGMCommands(msg, ...command) {
     //Get current info for player and game
     var currentGame = games[GetServerId(msg)];
     var currentPlayer = AllPlayers[GetUserId(msg)]
-
 
     //Handle setup command and validation for existing game and player
     if (command[0] == 'setup') {
@@ -158,29 +159,27 @@ function HandleGMCommands(msg, ...command) {
             msg.reply('Either you are in a game or the server already has a game running. You can not create a new game due to this.')
         }
     } else {
-        if (!currentPlayer || !currentGame) {
-            return;
+        if (currentPlayer && currentGame) {
+            if (command[0] == 'start') {
+                if (currentGame.gameState == 'setup' && currentGame.players.length >= 1) {
+                    StartGame(msg);
+                } else {
+                    msg.reply('Please finish setup with at least one player before starting game.')
+                }
+            } else if (command[0] == 'end') {
+                EndGame(msg, currentGame);
+            } else if (command[0] == 'drop') {
+                DropSupplies(msg, currentGame, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
+            } else if (command[0] == 'kill') {
+                KillPlayer(msg, currentGame, command.length < 2 ? '' : command[1]);
+            } else if (command[0] == 'hazard') {
+                Hazard(msg, currentGame, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
+            } else if (command[0] == 'close') {
+                Close(msg, currentGame, command.length < 2 ? '' : command[1], command.length < 3 ? '' : command[2]);
+            } else if (command[0] == 'list') {
+                List(msg, currentGame, command.length < 2 ? null : command[1], command.length < 3 ? null : command[2]);
+            }
         }
-    }
-
-    if (command[0] == 'start') {
-        if (currentGame.gameState == 'setup' && currentGame.players.length >= 1) {
-            StartGame(msg);
-        } else {
-            msg.reply('Please finish setup with at least one player before starting game.')
-        }
-    } else if (command[0] == 'end') {
-        EndGame();
-    } else if (command[0] == 'drop') {
-        DropSupplies(msg, currentGame, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
-    } else if (command[0] == 'kill') {
-        KillPlayer(msg, currentGame, command.length < 2 ? '' : command[1]);
-    } else if (command[0] == 'hazard') {
-        Hazard(msg, currentGame, command.length < 3 ? '' : command[1], command.length < 3 ? '' : command[2]);
-    } else if (command[0] == 'close') {
-        Close(msg, currentGame, command.length < 2 ? '' : command[1], command.length < 3 ? '' : command[2]);
-    } else if (command[0] == 'list') {
-        List(msg, currentGame, command.length < 2 ? null : command[1], command.length < 3 ? null : command[2]);
     }
 }
 
@@ -201,7 +200,9 @@ function HandlePlayerCommands(msg, ...command) {
     }
     if (msg.channel.type != 'DM' &&
         (command[0] == 'look' || command[0] == 'pickup' ||
-            command[0] == 'move' || command[0] == 'drop')) {
+            command[0] == 'move' || command[0] == 'drop' ||
+            command[0] == 'use' || command[0] == 'status' ||
+            command[0] == 'equip' || command[0] == 'attack')) {
         msg.member.send('You should DM the bot to keep your actions hidden')
         return;
     }
@@ -236,7 +237,7 @@ function HandlePlayerCommands(msg, ...command) {
         Status(msg, currentGame);
     } else if (command[0] == 'equip') {
         Equip(msg, currentGame, command.length > 1 ? command[1] : null);
-    } else if (command[0] == 'atack') {
+    } else if (command[0] == 'attack') {
         Attack(msg, currentGame, command.length > 1 ? command[1] : null);
     }
 }
@@ -258,7 +259,7 @@ function HandleHelpCommands(msg, ...command) {
 
 //#region GM Setup Stuff
 function registerGM(msg) {
-    let role = msg.guild.roles.cache.get('BBGM')
+    let role = msg.guild.roles.cache.find((r) => { return r.name == 'BBGM' })
     if (role) {
         role.members.forEach((member, i) => {
             member.roles.remove(role);
@@ -272,6 +273,7 @@ function registerGM(msg) {
     ServerId = msg.guildId;
     let newGame = new Game(GmId, ServerId);
     games[ServerId] = newGame;
+    AllPlayers[GetUserId(msg)] = 'GM';
     newGame.gameState = 'setup';
     msg.member.send('You have been selected to be the GM for the next game.')
 }
@@ -316,7 +318,7 @@ function selectTrait(msg, game, trait) {
             let traitInfo = basicTraitLookup.find((x) => { return x == trait });
             if (traitInfo != null) {
                 player.trait = traitInfo;
-                if(traitInfo == 'runner') {
+                if (traitInfo == 'runner') {
                     player.energy = 120;
                 }
             }
@@ -363,6 +365,7 @@ function DropSupplies(msg, currentGame, target, itemName) {
         let loc = currentGame.locations.find((x) => { return x.name == target });
         let itemData = currentGame.itemLookup.find((x) => { return x.name == itemName })
         if (loc != null && itemData != null) {
+
             loc.items.push(itemData);
         } else {
             msg.reply('Location or Item does not exist');
@@ -616,7 +619,7 @@ function Attack(msg, game, target) {
             let otherPlayer = game.players.find((x) => { return x.name == target });
             if (otherPlayer != null) {
                 let attackInfo = PlayerAttack(msg, player, otherPlayer, false);
-                if(attackInfo.didAttack) {
+                if (attackInfo.didAttack) {
                     HandleEnergyRequirements(msg, game, player, 'attack');
                 }
                 if (attackInfo.canCounter) {
@@ -643,7 +646,7 @@ function RemovePlayer(msg, game, player) {
     players = game.players.filter((x) => x.playerId != player.playerId)
     //TODO: Put message in the info channel
     if (players.length <= 1) {
-        EndGame(game.ServerId);
+        EndGame(msg, game);
     }
 }
 
@@ -690,13 +693,33 @@ function RemoveItemFromPlayer(player, itemName) {
 }
 
 function SendMessageToUserById(id, message) {
-    let user = client.users.cache.get(id);
+    let user = client.users.cache.find((u) => { return u.id == id });
     user.send(message);
 }
 
-function SendMessageToChannelById(id, message) {
-    let channel = client.channels.cache.get(id);
+function SendMessageToChannelById(Channelid, message) {
+    let channel = client.channels.cache.find((c) => {return c.ed == id});
     channel.send(message);
+}
+
+function SendMessageToBBInfoChannel(ServerId, message) {
+    let guild = client.guilds.cache.find((g) => {return g.id == ServerId});
+    if(guild) {
+        let channel = guild.channels.cache.find((c) => c.name == 'bb-game-info');
+        if(channel) {
+            channel.send(message);
+        }
+    }
+}
+
+function SendMessageToBBSetupChannel(ServerId, message) {
+    let guild = client.guilds.cache.find((g) => {return g.id == id});
+    if(guild) {
+        let channel = guild.channels.cache.find((c) => c.name == 'bb-game-setup');
+        if(channel) {
+            channel.send(message);
+        }
+    }
 }
 
 function HandleEnergyRequirements(msg, game, player, actionName) {
@@ -710,16 +733,24 @@ function HandleEnergyRequirements(msg, game, player, actionName) {
     return true;
 }
 
-function EndGame(ServerId) {
-    //TODO: put End game message in info channel
-    games[ServerId] = undefined;
-    let role = msg.guild.roles.cache.find((r) => { return r.id == 'BBGM' });
-    if (role) {
-        let user = client.users.cache.get(id);
-        user.roles.remove(role);
-    } else {
-        return;
+function EndGame(msg, game) {
+    //Remove game info
+    games[game.ServerId] = undefined;
+    AllPlayers[game.GmId] = undefined;
+    game.players.forEach(element => {
+        AllPlayers[element.playerId] = undefined;
+    });
+    //Remove roles
+    let guild = client.guilds.cache.find((g) => { return g.id == game.ServerId });
+    if (guild) {
+        let role = guild.roles.cache.find((r) => { return r.name == 'BBGM' });
+        if (role) {
+            let user = guild.members.cache.find((u) => { return u.id == game.GmId });
+            user.roles.remove(role);
+        } 
     }
+    //Sned message
+    SendMessageToBBInfoChannel(game.ServerId,'The game Has ended')
 }
 
 function GetUserId(msg) {
@@ -738,7 +769,7 @@ function delayForSeconds(sec) {
 //#region String Methods
 function GetGeneralHelpString() {
     let reply = 'Battle Bot Info: This is a bot that facilitates a battle royal game with one game master and multiple players'
-    reply += '\nFor innformation on specific commmands/setup use on of the following help commands';
+    reply += '\nFor information on specific commands/setup use on of the following help commands';
     reply += '\n!help configuration'
     reply += '\n!help gameSetup'
     reply += '\n!help gameMaster'
@@ -947,7 +978,7 @@ function GetHazardListString(game) {
 async function RegenEnergy(currentGame) {
     while (currentGame.gameState == 'in-progress' && games[currentGame.ServerId]) {
         currentGame.players.forEach(element => {
-            let maxEnergy =  element.trait == 'runner' ? 120 : 100;
+            let maxEnergy = element.trait == 'runner' ? 120 : 100;
             element.energy = Math.min(maxEnergy, element.energy + 1);
         });
         await delayForSeconds(5);
