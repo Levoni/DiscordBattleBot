@@ -134,7 +134,7 @@ function HandleGMCommands(msg, ...command) {
         return;
 
     //Validate commands are gomming from proper channel
-    if (msg.channel.type == 'DM' &&
+    if ((msg.channel.name != 'bb-game-setup' ) &&
         (command[0] == 'setup' || command[0] == 'start' || command[0] == 'end')) {
         msg.reply('Please setup, start, and end the game using the bb-game-setup channel and not DMs')
         return;
@@ -207,18 +207,21 @@ function HandlePlayerCommands(msg, ...command) {
         return;
     }
 
-    //Enroling feedback
+    //Enrolling feedback
     if (command[0] == 'enroll') {
-        if (currentPlayer == null) {
+        // if (currentPlayer == null) {
             if (!currentGame) {
                 msg.reply('No game is in progress. Please start game setup before enrolling');
             } else if (currentGame.gameState == 'setup')
-                registerPlayer(msg.member);
+                registerPlayer(msg.member, currentGame);
             else if (currentGame.gameState == 'in-progress')
                 msg.reply('Game is in progress. End the current game and start setup before enrolling');
             return;
-        }
-    }
+        } 
+        // else {
+        //     msg.reply('You are already involved in another game')
+        // }
+    // }
 
     //command handlers
     if (command[0] == 'selectTrait') {
@@ -287,7 +290,7 @@ function StartGame(msg) {
     currentGame.gameState = 'in-progress';
 
     //Location generation
-    let createdLocations = createBasicLevel();
+    let createdLocations = createBasicLevel(currentGame);
     currentGame.locations = createdLocations;
 
     //Player Locations
@@ -298,13 +301,13 @@ function StartGame(msg) {
     //Kick off continuous energy regen
     RegenEnergy(currentGame);
 
-    msg.reply('The game has started');
+    SendMessageToBBInfoChannel(currentGame.ServerId, 'The Game has started')
 }
 //#endregion
 
 //#region Player Setup Stuff
-function registerPlayer(member) {
-    players.push(new Player(member));
+function registerPlayer(member, currentGame) {
+    currentGame.players.push(new Player(member));
     member.send('May the odds be ever in your favor.')
 }
 function selectTrait(msg, game, trait) {
@@ -321,6 +324,7 @@ function selectTrait(msg, game, trait) {
                 if (traitInfo == 'runner') {
                     player.energy = 120;
                 }
+                msg.reply(`You have selected the ${traitInfo.name}`)
             }
         }
     }
@@ -328,8 +332,8 @@ function selectTrait(msg, game, trait) {
 //#endregion
 
 //#region Level setup
-function createBasicLevel() {
-    let locCount = Math.floor(players.length / 2);
+function createBasicLevel(game) {
+    let locCount = Math.floor(game.players.length / 2);
     let LocList = [];
     for (let i = 0; i <= locCount; i++) {
         let tempName = 'sector' + i;
@@ -345,11 +349,10 @@ function createBasicLevel() {
         } else {
             connected.push('sector' + (i + 1));
         }
-        locations.push(new Location(name, { itemsToAdd: [], connectedLocations: connected }));
+        game.locations.push(new Location(tempName, game, { itemsToAdd: [], connectedLocations: connected }));
     }
     let itemsToAdd = ['bat', 'knife', 'pistol', 'pistol-ammo', 'medkit', 'food'];
-    locations.push(Location('cornucopian', { itemsToAdd: itemsToAdd, connectedLocations: LocList }));
-    return locations
+    game.locations.push(new Location('cornucopian', game, { itemsToAdd: itemsToAdd, connectedLocations: LocList }));
 }
 //#endregion
 
@@ -365,8 +368,8 @@ function DropSupplies(msg, currentGame, target, itemName) {
         let loc = currentGame.locations.find((x) => { return x.name == target });
         let itemData = currentGame.itemLookup.find((x) => { return x.name == itemName })
         if (loc != null && itemData != null) {
-
             loc.items.push(itemData);
+            SendMessageToBBInfoChannel(currentGame.ServerId, `Item ${itemName} has been dropped at ${loc.name}`)
         } else {
             msg.reply('Location or Item does not exist');
         }
@@ -393,9 +396,10 @@ function Hazard(msg, game, targetLocation, targetHazard) {
     let loc = game.locations.find((x) => { return x.name == targetLocation });
     let hazardInfo = game.hazardLookup.find((x) => { return x.name == targetHazard });
     if (loc != null && hazardInfo != null) {
+        SendMessageToBBInfoChannel(game.ServerId, `A ${hazardInfo.name} has struck ${loc.name}`);
         let playerList = game.players.filter((x) => { return x.loc = loc.name });
         for (let i = 0; i < playerList.length; i++) {
-            DamagePlayer(msg, playerList[i], hazardInfo.value);
+            DamagePlayer(msg, playerList[i], hazardInfo.value, hazardInfo.name);
         }
     }
 }
@@ -407,6 +411,7 @@ function Close(msg, game, targetLocation, moveType) {
     }
     let loc = game.locations.find((x) => { return x.name == targetLocation });
     if (loc != null) {
+        SendMessageToBBInfoChannel(game.ServerId, `Location ${loc.name} was closed`)
         let playerList = game.players.filter((x) => { return x.loc == loc.name });
         for (let i = 0; i < playerList.length; i++) {
             if (moveType == 'kill')
@@ -457,7 +462,9 @@ function PlayerLook(msg, game) {
     if (player != null) {
         let currentLoc = game.locations.find(x => player.loc == x.name);
         if (currentLoc != null) {
-            HandleEnergyRequirements(msg, game, player, 'look');
+            if(!HandleEnergyRequirements(msg, game, player, 'look')) {
+                return;
+            }
             let reply = `Current Location:  ${currentLoc.name} | `
             reply += GetLocationItemsString(currentLoc) + ' | ';
             reply += GetConnectedLocationsString(currentLoc, game) + ' | ';
@@ -479,7 +486,9 @@ function PickUp(msg, game, target) {
             }
             let item = loc.items.find((x) => { return x.name == target });
             if (item != null) {
-                HandleEnergyRequirements(msg, game, player, 'pickup');
+                if(!HandleEnergyRequirements(msg, game, player, 'pickup')) {
+                    return;
+                }
                 if (player.invWeight + item.weight < 2) {
                     player.invWeight += item.weight;
                     player.inv.push(item);
@@ -507,7 +516,9 @@ function Move(msg, game, target) {
             }
             let newLocation = loc.connectedLoc.find((x) => { return x == target });
             if (newLocation != null) {
-                HandleEnergyRequirements(msg, game, player, 'move');
+                if(!HandleEnergyRequirements(msg, game, player, 'move')) {
+                    return;
+                }
                 player.loc = newLocation;
                 msg.reply('Player moved to ' + newLocation);
             } else {
@@ -529,10 +540,13 @@ function Drop(msg, game, target) {
             }
             let itemInfo = game.itemLookup.find((x) => { return x.name = itemName });
             if (itemInfo != null) {
-                HandleEnergyRequirements(msg, game, player, 'drop');
+                if(!HandleEnergyRequirements(msg, game, player, 'drop')) {
+                    return;
+                }
                 player.invWeight -= itemInfo.weight;
                 loc.items.push(itemInfo);
                 RemoveItemFromPlayer(player, game, itemInfo.name);
+                msg.reply(`You have dropped item ${itemInfo.name}`)
                 if (player.equippedItem == itemInfo.name) {
                     player.equippedItem = 'none';
                 }
@@ -556,15 +570,19 @@ function Use(msg, game, target) {
             let itemInfo = game.itemLookup.find((x) => { return x.name == target });
             if (itemInfo != null) {
                 if (itemInfo.type == 'consumable') {
-                    HandleEnergyRequirements(msg, game, player, 'use');
+                    if(!HandleEnergyRequirements(msg, game, player, 'use')) {
+                        return;
+                    }
                     if (itemInfo.subType == 'health') {
                         if (player.trait == 'nurse') {
                             player.health = Math.min(itemInfo.value + 5 + player.health, 100);
                         } else {
                             player.health = Math.min(itemInfo.value + player.health, 100);
                         }
+                        msg.reply(`You used item ${itemInfo.name}. Current Health: ${player.health}`);
                     } else if (itemInfo.subType == 'energy') {
                         player.energy = Math.min(itemInfo.value + player.energy, 100);
+                        msg.reply(`You used item ${itemInfo.name}. Current Energy: ${player.energy}`);
                     }
                     RemoveItemFromPlayer(player, itemInfo.name);
                 } else {
@@ -580,7 +598,9 @@ function Status(msg, game) {
     let id = GetUserId(msg);
     let player = game.players.find((x) => { return x.playerId == id })
     if (player != null) {
-        HandleEnergyRequirements(msg, game, player, 'status');
+        if(!HandleEnergyRequirements(msg, game, player, 'status')) {
+            return;
+        }
         let reply = 'Status - ';
         reply += GetPlayerStatsString(player);
         reply += ' | ' + GetPlayerItemsString(player);
@@ -598,8 +618,11 @@ function Equip(msg, game, target) {
         let itemInfo = player.inv.find((x) => { return x.name == target });
         if (itemInfo != null) {
             if (itemInfo.type == 'weapon') {
-                HandleEnergyRequirements(msg, game, player, 'equip');
+                if(!HandleEnergyRequirements(msg, game, player, 'equip')) {
+                    return;
+                }
                 player.equippedItem = itemInfo.name;
+                msg.reply(`You have equipped ${player.equippedItem}`);
             }
         }
     }
@@ -618,9 +641,14 @@ function Attack(msg, game, target) {
             }
             let otherPlayer = game.players.find((x) => { return x.name == target });
             if (otherPlayer != null) {
+                //check energy beforeHand
+                if(!HandleEnergyRequirements(msg, game, player, 'attack')) {
+                    return;
+                }
                 let attackInfo = PlayerAttack(msg, player, otherPlayer, false);
-                if (attackInfo.didAttack) {
-                    HandleEnergyRequirements(msg, game, player, 'attack');
+                if (!attackInfo.didAttack) {
+                    player.energy += game.energyCostLookup.find((X) => { return X.name == actionName }).value
+                    return
                 }
                 if (attackInfo.canCounter) {
                     let counterChance = otherPlayer.trait == 'martialArtest' ? 20 : 10;
@@ -644,7 +672,7 @@ function RemovePlayer(msg, game, player) {
         });
     }
     players = game.players.filter((x) => x.playerId != player.playerId)
-    //TODO: Put message in the info channel
+    SendMessageToBBInfoChannel(`player ${player.name} has died`)
     if (players.length <= 1) {
         EndGame(msg, game);
     }
@@ -656,9 +684,9 @@ function PlayerAttack(msg, game, attacker, target, isCounter) {
     let didAttack = true;
     if (equippedItemInfo == null) {
         if (player.trait == 'boxer') {
-            DamagePlayer(msg, game, target, meeleDamage * 2);
+            DamagePlayer(msg, game, target, meeleDamage * 2, attacker.name);
         } else {
-            DamagePlayer(msg, game, target, meeleDamage);
+            DamagePlayer(msg, game, target, meeleDamage, attacker.name);
         }
     } else if (equippedItemInfo.subType == 'melee') {
         DamagePlayer(msg, game, target, equippedItemInfo.value);
@@ -667,7 +695,7 @@ function PlayerAttack(msg, game, attacker, target, isCounter) {
         if (ammo != null) {
             let hitChance = player.trait == 'sharpShooter' ? 95 : 80;
             if (Math.floor(Math.random() * 100) <= hitChance) {
-                DamagePlayer(msg, game, target, equippedItemInfo.value);
+                DamagePlayer(msg, game, target, equippedItemInfo.value, target.name );
                 RemoveItemFromPlayer(attacker, equippedItemInfo.name + '-ammo');
             }
         } else {
@@ -677,9 +705,10 @@ function PlayerAttack(msg, game, attacker, target, isCounter) {
     return { canCounter: canCounter, didAttack: didAttack };
 }
 
-function DamagePlayer(msg, game, player, damage) {
+function DamagePlayer(msg, game, player, damage, source) {
     player.health -= damage;
-    SendMessageToUserById(player.playerId, `You have received ${damage} damage`)
+    let sourceString = source ? ' from ' + source : ''; 
+    SendMessageToUserById(player.playerId, `You have received ${damage} damage${sourceString}`)
     if (player.health <= 0) {
         RemovePlayer(msg, game, player)
     }
@@ -998,13 +1027,13 @@ function Player(member) {
         this.inv = [],
         this.equippedItem = 'none'
 }
-function Location(name, itemAndLocationObject) {
+function Location(name, game, itemAndLocationObject) {
     this.name = name;
     this.connectedLoc = itemAndLocationObject.connectedLocations;
     this.items = [];
     this.closed = false;
     itemAndLocationObject.itemsToAdd.forEach(element => {
-        this.items.push(itemLookup.find(element));
+        this.items.push(game.itemLookup.find((x) => x.name == element));
     });
 }
 function Game(GmId, ServerId) {
